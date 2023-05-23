@@ -17,7 +17,6 @@ class SoftphoneHook(BaseHook):
     def __init__(self, softphone_conn_id=default_conn_name):
         self.softphone_conn_id = softphone_conn_id
         self._base_url = ""
-        self.tenant = ""
 
     def get_conn(self) -> Session | None:
         conn = self.get_connection(self.softphone_conn_id)
@@ -34,15 +33,17 @@ class SoftphoneHook(BaseHook):
         if not conn.password:
             self.log.warning("Connection to %s requires password", conn.host)
             raise SystemError
-        if not conn.extra_dejson["tenant"]:
+        if not conn.extra_dejson.get("tenant"):
             self.log.warning("Connection to %s requires extra:tenant", conn.host)
+        tenant = conn.extra_dejson["tenant"]
         session = Session()
+        proto, url, domain = conn.host.split(".")
+        auth_header = f"{proto}{tenant}.{url}.{domain}/login"
         session.post(
-            url=self._base_url,  # noqa #type: ignore
+            url=f"{conn.host}/api/auth",
             json={"login": conn.login, "password": conn.password},
-            headers={"Referer": f"https://{self.tenant}.softphone.pro/login/"},
+            headers={"Referer": auth_header},
         )
-
         return session
 
     def _format_dt_offset(self, offset: int | None):
@@ -50,8 +51,8 @@ class SoftphoneHook(BaseHook):
             return f"%2B{str(timedelta(minutes=offset))}"
         else:
             return "%2B00:00"
-    
-    def _format_tz_offset(self, offset:int | None):
+
+    def _format_tz_offset(self, offset: int | None):
         if offset:
             return f"%2B{offset}"
         else:
@@ -63,14 +64,14 @@ class SoftphoneHook(BaseHook):
         to_dt: datetime,
         from_date_offset: int | None = None,
         to_date_offset: int | None = None,
-        local_timezone_offset:int|None = None
+        local_timezone_offset: int | None = None,
     ):
         response = self.get_conn.get(
             url=f"{self._base_url}/api/history/calls/export",
             params={
                 "dateFrom": f"{from_dt.astimezone().isoformat(timespec='seconds')}{self._format_dt_offset(from_date_offset)}",
                 "toDate": f"{to_dt.astimezone().isoformat(timespec='seconds')}{self._format_dt_offset(to_date_offset)}",
-                "localTimeZoneOffset":self._format_tz_offset(local_timezone_offset)
+                "localTimeZoneOffset": self._format_tz_offset(local_timezone_offset),
             },
         )
         return response.content
